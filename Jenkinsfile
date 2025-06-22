@@ -1,8 +1,8 @@
 pipeline {
     agent any
     environment {
-        BROWSERSTACK_USERNAME = credentials('michaelzada_kKTcgR')
-        BROWSERSTACK_ACCESS_KEY = credentials('voDkvRqyaPzkku9ncwt8ID')
+        BROWSERSTACK_USERNAME = credentials('d165da47-3c30-4ac2-9ab8-0bd037b78e0e')
+        BROWSERSTACK_ACCESS_KEY = credentials('d165da47-3c30-4ac2-9ab8-0bd037b78e0e')
     }
     stages {
         stage('Checkout') {
