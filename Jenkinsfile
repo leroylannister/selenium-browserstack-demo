@@ -1,9 +1,5 @@
 pipeline {
     agent any
-    environment {
-        BROWSERSTACK_USERNAME = credentials('d165da47-3c30-4ac2-9ab8-0bd037b78e0e')
-        BROWSERSTACK_ACCESS_KEY = credentials('d165da47-3c30-4ac2-9ab8-0bd037b78e0e')
-    }
     stages {
         stage('Checkout') {
             steps {
@@ -21,11 +17,14 @@ pipeline {
         }
         stage('Run Selenium Tests') {
             steps {
-                sh '''
-                source selenium_env/bin/activate
-                python tests/test_bstackdemo.py
-                '''
+                browserstack(credentialsId: 'd165da47-3c30-4ac2-9ab8-0bd037b78e0e') {
+                    sh '''
+                    source selenium_env/bin/activate
+                    python tests/test_bstackdemo.py
+                    '''
+                }
             }
         }
     }
 }
+
