@@ -3,7 +3,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git 'https://github.com/leroylannister/selenium-browserstack-demo.git'
+                git branch: 'main', url: 'https://github.com/leroylannister/selenium-browserstack-demo.git'
             }
         }
         stage('Set up Python') {
