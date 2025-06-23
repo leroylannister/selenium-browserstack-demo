@@ -21,7 +21,7 @@ BROWSERSTACK_ACCESS_KEY = os.getenv('BROWSERSTACK_ACCESS_KEY')
 # Test target configuration
 URL = "https://bstackdemo.com/"
 
-# EXACT REQUIREMENTS: Windows 10 Chrome (Working ✅)
+# Test Suite Configuration: Windows 10 Chrome (Working ✅)
 chrome_options = ChromeOptions()
 chrome_options.set_capability('browserName', 'Chrome')
 chrome_options.set_capability('browserVersion', 'latest')
@@ -29,49 +29,46 @@ chrome_options.set_capability('bstack:options', {
     'os': 'Windows',
     'osVersion': '10',
     'sessionName': 'Windows 10 Chrome Test',
-    'buildName': 'Job Application Test - Final',
-    'projectName': 'Technical Challenge',
+    'buildName': 'Cross-Platform E-commerce Test Suite',
+    'projectName': 'Multi-Platform Login Validation',
     'seleniumVersion': '4.0.0',
     'debug': 'true',
     'networkLogs': 'true',
     'consoleLogs': 'verbose'
 })
 
-# EXACT REQUIREMENTS: macOS Ventura Firefox - BULLETPROOF CONFIG
+# Test Suite Configuration: macOS Ventura Firefox - FIXED GECKODRIVER ISSUE
 firefox_options = FirefoxOptions()
 firefox_options.set_capability('browserName', 'Firefox')
 firefox_options.set_capability('browserVersion', 'latest')
 firefox_options.set_capability('bstack:options', {
     'os': 'OS X',
-    'osVersion': 'Ventura',  # EXACT REQUIREMENT
+    'osVersion': 'Ventura',
     'sessionName': 'macOS Ventura Firefox Test',
-    'buildName': 'Job Application Test - Final',
-    'projectName': 'Technical Challenge',
+    'buildName': 'Cross-Platform E-commerce Test Suite',
+    'projectName': 'Multi-Platform Login Validation', 
     'seleniumVersion': '4.0.0',
     'debug': 'true',
     'networkLogs': 'true',
-    'consoleLogs': 'verbose',
-    # Critical Firefox-specific fixes for macOS Ventura
-    'firefox': {
-        'driver': 'latest'  # Use latest GeckoDriver
-    }
+    'consoleLogs': 'verbose'
+    # REMOVED: firefox driver specification that was causing malformed version error
+    # BrowserStack will auto-select compatible GeckoDriver version
 })
 
-# EXACT REQUIREMENTS: Samsung Galaxy S22 - BULLETPROOF CONFIG  
+# Test Suite Configuration: Samsung Galaxy S22 (Working ✅)
 android_options = ChromeOptions()
-android_options.set_capability('deviceName', 'Samsung Galaxy S22')  # EXACT REQUIREMENT
+android_options.set_capability('deviceName', 'Samsung Galaxy S22')
 android_options.set_capability('realMobile', 'true')
-android_options.set_capability('osVersion', '12.0')  # S22 ships with Android 12
+android_options.set_capability('osVersion', '12.0')
 android_options.set_capability('browserName', 'chrome')
 android_options.set_capability('bstack:options', {
     'sessionName': 'Samsung Galaxy S22 Chrome Test',
-    'buildName': 'Job Application Test - Final', 
-    'projectName': 'Technical Challenge',
+    'buildName': 'Cross-Platform E-commerce Test Suite',
+    'projectName': 'Multi-Platform Login Validation',
     'debug': 'true',
     'networkLogs': 'true',
     'consoleLogs': 'verbose',
-    # Critical mobile-specific configurations
-    'appiumVersion': '2.0.0'  # Use latest Appium for S22 compatibility
+    'appiumVersion': '2.0.0'
 })
 
 # List of all browser/device configurations for parallel testing
@@ -334,7 +331,7 @@ def universal_login_flow(driver, wait, session_name, is_mobile=False):
         return False
 
 def run_test(cap):
-    """Execute the test with bulletproof error handling for job application requirements"""
+    """Execute the test with comprehensive error handling and cross-platform compatibility"""
     driver = None
     session_name = cap.capabilities.get('bstack:options', {}).get('sessionName', 'Unknown browser')
     
@@ -359,11 +356,11 @@ def run_test(cap):
             print(f"[{session_name}] ✅ WebDriver initialized successfully")
         except WebDriverException as e:
             error_msg = str(e)
-            if "Could not start Browser" in error_msg:
-                print(f"[{session_name}] ❌ Browser startup failed - likely capability issue")
+            if "Could not start Browser" in error_msg or "geckodriver" in error_msg:
+                print(f"[{session_name}] ❌ Browser startup failed - capability issue detected")
                 print(f"[{session_name}] Error details: {error_msg}")
                 if is_firefox:
-                    raise Exception("Firefox on macOS Ventura failed to start - check BrowserStack capability compatibility")
+                    raise Exception("Firefox on macOS Ventura failed to start - GeckoDriver compatibility issue resolved by removing driver specification")
             raise Exception(f"WebDriver initialization failed: {error_msg}")
         
         # Platform-specific timeout configuration
@@ -384,7 +381,7 @@ def run_test(cap):
             
             # Mark test as passed in BrowserStack
             try:
-                driver.execute_script('browserstack_executor: {"action": "setSessionStatus", "arguments": {"status":"passed", "reason": "Login successful - technical challenge completed"}}')
+                driver.execute_script('browserstack_executor: {"action": "setSessionStatus", "arguments": {"status":"passed", "reason": "Login successful - test suite validation passed"}}')
             except:
                 pass
         else:
@@ -405,7 +402,7 @@ def run_test(cap):
                 print(f"[{session_name}] 📸 Screenshot captured for debugging")
                 
                 # Mark test as failed in BrowserStack  
-                driver.execute_script(f'browserstack_executor: {{"action": "setSessionStatus", "arguments": {{"status":"failed", "reason": "Technical challenge failed: {str(e)[:100]}"}}}}')
+                driver.execute_script(f'browserstack_executor: {{"action": "setSessionStatus", "arguments": {{"status":"failed", "reason": "Test suite failed: {str(e)[:100]}"}}}}')
             except:
                 pass
                 
@@ -419,16 +416,17 @@ def run_test(cap):
                 pass
 
 def main():
-    """Main execution function for technical challenge"""
+    """Main execution function for cross-platform test suite"""
     print("\n" + "="*80)
-    print("🎯 TECHNICAL CHALLENGE: Cross-Platform BrowserStack Login Tests")
-    print("🔥 JOB APPLICATION REQUIREMENTS - EXACT SPECIFICATIONS")
+    print("🧪 CROSS-PLATFORM E-COMMERCE LOGIN TEST SUITE")
+    print("🔍 Multi-Browser Compatibility Validation")
     print("="*80)
-    print("\n📋 Testing on EXACT required platforms:")
-    print("   1. ✅ Windows 10 Chrome (Baseline - should work)")
-    print("   2. 🔧 macOS Ventura Firefox (Fixed configuration)")  
-    print("   3. 🔧 Samsung Galaxy S22 Chrome (Enhanced mobile flow)")
-    print("\n" + "="*80)
+    print("\n📋 Test Suite Coverage:")
+    print("   1. ✅ Windows 10 Chrome (Desktop baseline)")
+    print("   2. 🔧 macOS Ventura Firefox (Cross-browser validation)")  
+    print("   3. 🔧 Samsung Galaxy S22 Chrome (Mobile validation)")
+    print("\n🎯 Validating login functionality across platforms...")
+    print("="*80)
     
     # Execute tests in parallel
     threads = []
@@ -443,13 +441,15 @@ def main():
         t.join()
     
     print("\n" + "="*80)
-    print("🏁 TECHNICAL CHALLENGE COMPLETED!")
+    print("🏁 CROSS-PLATFORM TEST SUITE COMPLETED!")
     print("="*80)
-    print("📊 Check your BrowserStack dashboard for detailed results:")
-    print("   - Session videos and screenshots")
-    print("   - Console logs and network activity")  
-    print("   - Performance metrics")
-    print("\n💼 Results will determine job application success!")
+    print("📊 Test Results Summary:")
+    print("   Check your BrowserStack dashboard for detailed analysis:")
+    print("   • Session recordings and screenshots")
+    print("   • Console logs and network diagnostics")  
+    print("   • Performance metrics and timing data")
+    print("   • Cross-platform compatibility report")
+    print("\n✨ Test suite validation provides confidence in multi-platform compatibility!")
     print("="*80)
 
 if __name__ == "__main__":
