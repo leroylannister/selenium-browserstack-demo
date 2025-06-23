@@ -6,6 +6,7 @@ pipeline {
         // Stage 1: Checkout source code from Git repository
         stage('Checkout') {
             steps {
+                deleteDir() // Clean workspace before checkout
                 // Clone the main branch of the Selenium BrowserStack demo repository
                 git branch: 'main', url: 'https://github.com/leroylannister/selenium-browserstack-demo.git'
             }
@@ -26,7 +27,7 @@ pipeline {
                 '''
             }
         }
-        
+        ›
         // Stage 3: Execute Selenium tests using BrowserStack
         stage('Run Selenium Tests') {
             steps {
