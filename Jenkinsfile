@@ -29,19 +29,13 @@ pipeline {
         
         stage('Run Selenium Tests') {
             steps {
-                withCredentials([
-                    string(credentialsId: 'd165da47-3c30-4ac2-9ab8-0bd037b78e0e', variable: 'BROWSERSTACK_USERNAME'),
-                    string(credentialsId: 'd165da47-3c30-4ac2-9ab8-0bd037b78e0e', variable: 'BROWSERSTACK_ACCESS_KEY')
-                ]) {
+                // Use the BrowserStack plugin wrapper
+                browserstack(credentialsId: 'd165da47-3c30-4ac2-9ab8-0bd037b78e0e') {
                     sh '''
                         # Activate virtual environment and run tests
                         source selenium_env/bin/activate
                         
-                        # Export BrowserStack credentials
-                        export BROWSERSTACK_USERNAME=$BROWSERSTACK_USERNAME
-                        export BROWSERSTACK_ACCESS_KEY=$BROWSERSTACK_ACCESS_KEY
-                        
-                        # Run the tests
+                        # BrowserStack plugin sets these environment variables automatically
                         python tests/test_bstackdemo.py
                     '''
                 }
@@ -63,4 +57,3 @@ pipeline {
         }
     }
 }
-
