@@ -1,2 +1,4 @@
-.env
+# Exclude environment variables and configuration files
+.env 
+# Exclude virtual environment directories
 selenium_env/

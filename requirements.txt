@@ -1,3 +1,4 @@
-selenium
-webdriver-manager
-python-dotenv
+# Selenium testing dependencies
+selenium            # WebDriver for browser automation
+webdriver-manager   # Browser driver management
+python-dotenv       # Environment variable management
