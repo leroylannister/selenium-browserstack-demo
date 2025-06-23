@@ -1,4 +1,6 @@
 import os
+import time
+import threading
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -8,8 +10,6 @@ from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from dotenv import load_dotenv
-import threading
-import time
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,7 +21,7 @@ BROWSERSTACK_ACCESS_KEY = os.getenv('BROWSERSTACK_ACCESS_KEY')
 # Test target configuration
 URL = "https://bstackdemo.com/"
 
-# Test Suite Configuration: Windows 10 Chrome (Working ✅)
+# Test Suite Configuration: Windows 10 Chrome
 chrome_options = ChromeOptions()
 chrome_options.set_capability('browserName', 'Chrome')
 chrome_options.set_capability('browserVersion', 'latest')
@@ -36,7 +36,7 @@ chrome_options.set_capability('bstack:options', {
     'consoleLogs': 'verbose'
 })
 
-# EXACT FIX: macOS Ventura Firefox - CORRECT BROWSERSTACK FORMAT
+# macOS Ventura Firefox Configuration
 firefox_options = FirefoxOptions()
 firefox_options.set_capability('browserName', 'Firefox')
 firefox_options.set_capability('browserVersion', 'latest')
@@ -53,7 +53,7 @@ firefox_options.set_capability('bstack:options', {
     'consoleLogs': 'verbose'
 })
 
-# Test Suite Configuration: Samsung Galaxy S22 (Working ✅)
+# Samsung Galaxy S22 Configuration
 android_options = ChromeOptions()
 android_options.set_capability('deviceName', 'Samsung Galaxy S22')
 android_options.set_capability('realMobile', 'true')
@@ -76,25 +76,13 @@ capabilities = [chrome_options, firefox_options, android_options]
 def robust_element_interaction(driver, wait, locators, action_type="click", timeout=20, description="element"):
     """
     Ultra-robust element interaction with multiple strategies and connection validation
-    
-    Args:
-        driver: WebDriver instance
-        wait: WebDriverWait instance  
-        locators: List of (By, selector) tuples to try
-        action_type: "click", "send_keys", or "get_text"
-        timeout: Maximum wait time
-        description: Element description for logging
-    
-    Returns:
-        bool: True if successful, False otherwise
     """
     for i, (by, selector) in enumerate(locators):
         try:
             print(f"    Trying locator {i+1}/{len(locators)}: {by}='{selector}'")
             
-            # FIREFOX FIX: Validate connection before attempting interaction
+            # Validate connection before attempting interaction
             try:
-                # Test connection by getting current URL
                 current_url = driver.current_url
                 if not current_url:
                     print(f"    ⚠️  WARNING: No current URL detected, connection may be lost")
@@ -106,8 +94,7 @@ def robust_element_interaction(driver, wait, locators, action_type="click", time
             # Strategy 1: Standard WebDriverWait with clickable
             if action_type == "click":
                 element = wait.until(EC.element_to_be_clickable((by, selector)))
-                # Additional Firefox stability: Small pause before click
-                time.sleep(0.2)
+                time.sleep(0.2)  # Small pause for stability
                 element.click()
                 print(f"    ✅ SUCCESS: Standard click on {description}")
                 return True
@@ -119,10 +106,8 @@ def robust_element_interaction(driver, wait, locators, action_type="click", time
                 
         except TimeoutException:
             try:
-                # FIREFOX FIX: Re-validate connection before fallback
-                driver.current_url  # Test connection
-                
                 # Strategy 2: Find element and JavaScript click
+                driver.current_url  # Test connection
                 element = driver.find_element(by, selector)
                 if action_type == "click":
                     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
@@ -135,10 +120,8 @@ def robust_element_interaction(driver, wait, locators, action_type="click", time
                     return True
             except Exception as fallback_error:
                 try:
-                    # FIREFOX FIX: Final connection test before ActionChains
-                    driver.current_url  # Test connection
-                    
                     # Strategy 3: ActionChains interaction
+                    driver.current_url  # Test connection
                     from selenium.webdriver.common.action_chains import ActionChains
                     element = driver.find_element(by, selector)
                     if action_type == "click":
@@ -155,20 +138,18 @@ def robust_element_interaction(driver, wait, locators, action_type="click", time
 
 def universal_login_flow(driver, wait, session_name, is_mobile=False):
     """
-    Universal login flow with enhanced Firefox connection stability handling
+    Universal login flow with enhanced stability handling
     """
     try:
         print(f"[{session_name}] 🚀 Starting UNIVERSAL login flow (Mobile: {is_mobile})")
         
-        # FIREFOX FIX: Enhanced connection validation
         is_firefox = 'Firefox' in session_name
         if is_firefox:
             print(f"[{session_name}] 🦊 Firefox detected - applying stability enhancements")
         
-        # Extended wait for page load - especially important for mobile and Firefox
+        # Wait for page load
         print(f"[{session_name}] ⏳ Waiting for page to fully load...")
         
-        # FIREFOX FIX: More robust page load detection
         try:
             max_attempts = 3
             for attempt in range(max_attempts):
@@ -187,11 +168,11 @@ def universal_login_flow(driver, wait, session_name, is_mobile=False):
             print(f"[{session_name}] ⚠️  Page load detection failed, proceeding anyway")
         
         # Additional buffer for React components to initialize
-        firefox_buffer = 8 if is_firefox else 3  # Extra time for Firefox
+        firefox_buffer = 8 if is_firefox else 3
         mobile_buffer = 5 if is_mobile else firefox_buffer
         time.sleep(mobile_buffer)
         
-        # FIREFOX FIX: Connection validation before proceeding
+        # Connection validation for Firefox
         if is_firefox:
             try:
                 current_url = driver.current_url
@@ -222,13 +203,12 @@ def universal_login_flow(driver, wait, session_name, is_mobile=False):
             (By.CSS_SELECTOR, "[data-testid*='signin']")
         ]
         
-        # FIREFOX FIX: Shorter timeout for first interaction to detect issues early
         signin_timeout = 15 if is_firefox else 30
         if not robust_element_interaction(driver, wait, signin_locators, "click", 
                                         timeout=signin_timeout, description="Sign In button"):
             raise Exception("Could not click Sign In button")
         
-        # FIREFOX FIX: Connection validation after critical interaction
+        # Connection validation after critical interaction
         if is_firefox:
             try:
                 driver.current_url
@@ -236,7 +216,6 @@ def universal_login_flow(driver, wait, session_name, is_mobile=False):
             except Exception as conn_error:
                 raise Exception(f"Firefox connection lost after sign-in: {str(conn_error)}")
         
-        # Wait for login modal/page to appear
         time.sleep(5 if is_mobile else 3)
         
         # STEP 2: Handle Username Dropdown
@@ -256,7 +235,6 @@ def universal_login_flow(driver, wait, session_name, is_mobile=False):
                                         timeout=20, description="username dropdown"):
             raise Exception("Could not open username dropdown")
         
-        # Wait for dropdown options to appear
         time.sleep(3 if is_mobile else 2)
         
         # STEP 3: Select Username Option
@@ -296,7 +274,6 @@ def universal_login_flow(driver, wait, session_name, is_mobile=False):
                                         timeout=20, description="password dropdown"):
             raise Exception("Could not open password dropdown")
         
-        # Wait for dropdown options to appear
         time.sleep(3 if is_mobile else 2)
         
         # STEP 5: Select Password Option
@@ -336,23 +313,21 @@ def universal_login_flow(driver, wait, session_name, is_mobile=False):
                                         timeout=20, description="login button"):
             raise Exception("Could not click login button")
         
-        # STEP 7: Wait for Login Completion with Extended Timeout
+        # STEP 7: Wait for Login Completion
         print(f"[{session_name}] ⏳ STEP 7: Waiting for login completion...")
         
-        # Extended wait for login processing - especially critical for mobile and Firefox
         login_wait = 15 if is_firefox else 10 if is_mobile else 5
         time.sleep(login_wait)
         
-        # FIREFOX FIX: Connection validation before verification
+        # Connection validation before verification
         if is_firefox:
             try:
                 driver.current_url
                 print(f"[{session_name}] ✅ Firefox connection stable during login processing")
             except Exception as conn_error:
                 print(f"[{session_name}] ⚠️  Firefox connection issue during login: {str(conn_error)}")
-                # Don't fail immediately, try verification anyway
         
-        # Multiple verification strategies for successful login
+        # Verify successful login
         verification_locators = [
             (By.CLASS_NAME, "shelf-container"),
             (By.CSS_SELECTOR, ".shelf-container"),
@@ -383,14 +358,13 @@ def universal_login_flow(driver, wait, session_name, is_mobile=False):
             
             print(f"[{session_name}] Current URL: {current_url}")
             
-            # Success indicators
             success_indicators = [
                 "signin" not in current_url.lower(),
                 "stackdemo" in page_source,
                 "product" in page_source,
                 "shelf" in page_source,
                 "cart" in page_source,
-                len(page_source) > 5000  # Substantial page content
+                len(page_source) > 5000
             ]
             
             if any(success_indicators):
@@ -407,7 +381,7 @@ def universal_login_flow(driver, wait, session_name, is_mobile=False):
 
 
 def run_test(cap):
-    """Execute the test with comprehensive error handling and cross-platform compatibility"""
+    """Execute the test with comprehensive error handling"""
     driver = None
     session_name = cap.capabilities.get('bstack:options', {}).get('sessionName', 'Unknown browser')
     
@@ -421,7 +395,7 @@ def run_test(cap):
         
         print(f"[{session_name}] Platform detected - Mobile: {is_mobile}, Firefox: {is_firefox}")
         
-        # Initialize WebDriver with enhanced error handling
+        # Initialize WebDriver
         print(f"[{session_name}] 🔧 Initializing WebDriver connection...")
         
         try:
@@ -441,9 +415,9 @@ def run_test(cap):
                     raise Exception("GeckoDriver compatibility issue resolved - BrowserStack will auto-select driver")
             raise Exception(f"WebDriver initialization failed: {error_msg}")
         
-        # Platform-specific timeout configuration with Firefox optimizations
+        # Configure timeouts
         if is_firefox:
-            timeout = 75  # Increased timeout for Firefox stability
+            timeout = 75
             page_load_timeout = 100
         elif is_mobile:
             timeout = 90
