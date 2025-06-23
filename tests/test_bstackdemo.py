@@ -37,9 +37,9 @@ chrome_options.set_capability('bstack:options', {
     'consoleLogs': 'verbose'
 })
 
-# FIX: macOS Ventura Firefox - CORRECTED CAPABILITIES FORMAT
+# FIX: macOS Ventura Firefox - CORRECT BROWSERSTACK FORMAT
 firefox_options = FirefoxOptions()
-firefox_options.set_capability('browserName', 'firefox')  # LOWERCASE as per BrowserStack docs
+firefox_options.set_capability('browserName', 'Firefox')  # CAPITAL F as per BrowserStack docs
 firefox_options.set_capability('browserVersion', 'latest')
 firefox_options.set_capability('bstack:options', {
     'os': 'OS X',
@@ -47,12 +47,11 @@ firefox_options.set_capability('bstack:options', {
     'sessionName': 'macOS Ventura Firefox Test',
     'buildName': 'Cross-Platform E-commerce Test Suite',
     'projectName': 'Multi-Platform Login Validation',
-    'seleniumVersion': '4.0.0',
+    'userName': BROWSERSTACK_USERNAME,
+    'accessKey': BROWSERSTACK_ACCESS_KEY,
     'debug': 'true',
     'networkLogs': 'true',
-    'consoleLogs': 'verbose',
-    'userName': BROWSERSTACK_USERNAME,  # ADD: Explicit username/access key
-    'accessKey': BROWSERSTACK_ACCESS_KEY
+    'consoleLogs': 'verbose'
 })
 
 # Test Suite Configuration: Samsung Galaxy S22
@@ -341,7 +340,7 @@ def run_test(cap):
         # Detect platform type
         caps_str = str(cap.capabilities)
         is_mobile = 'deviceName' in caps_str or 'Samsung' in caps_str
-        is_firefox = 'firefox' in caps_str.lower()
+        is_firefox = 'Firefox' in caps_str  # Capital F detection
         
         print(f"[{session_name}] Platform detected - Mobile: {is_mobile}, Firefox: {is_firefox}")
         
@@ -431,7 +430,7 @@ def main():
     print("   2. 🔧 macOS Ventura Firefox (EXACT requirement - Fixed)")  
     print("   3. ✅ Samsung Galaxy S22 Chrome (Mobile validation)")
     print("\n🎯 Validating login functionality across platforms...")
-    print("🔧 Firefox Fix: Corrected capabilities format + explicit auth")
+    print("🔧 Firefox Fix: CAPITAL 'Firefox' browserName + explicit credentials")
     print("="*80)
     
     # Execute tests in parallel
