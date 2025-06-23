@@ -30,8 +30,8 @@ pipeline {
         stage('Run Selenium Tests') {
             steps {
                 withCredentials([
-                    string(credentialsId: 'michaelzada_kKTcgR', variable: 'BROWSERSTACK_USERNAME'),
-                    string(credentialsId: 'voDkvRqyaPzkku9ncwt8', variable: 'BROWSERSTACK_ACCESS_KEY')
+                    string(credentialsId: 'd165da47-3c30-4ac2-9ab8-0bd037b78e0e', variable: 'BROWSERSTACK_USERNAME'),
+                    string(credentialsId: 'd165da47-3c30-4ac2-9ab8-0bd037b78e0e', variable: 'BROWSERSTACK_ACCESS_KEY')
                 ]) {
                     sh '''
                         # Activate virtual environment and run tests
