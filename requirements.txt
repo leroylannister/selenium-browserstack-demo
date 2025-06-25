@@ -1,4 +1,4 @@
-# Selenium testing dependencies
-selenium            # WebDriver for browser automation
-webdriver-manager   # Browser driver management
-python-dotenv       # Environment variable management
+selenium>=4.15.0
+webdriver-manager>=4.0.1
+python-dotenv>=1.0.0
+urllib3>=2.0.0

@@ -53,7 +53,7 @@ def create_chrome_windows_capabilities():
 
 
 def create_firefox_macos_capabilities():
-    """Create Firefox on macOS Ventura capabilities"""
+    """Create Firefox on macOS Ventura capabilities - CORRECTED VERSION"""
     options = FirefoxOptions()
     options.set_capability('browserName', 'Firefox')
     options.set_capability('browserVersion', 'latest')
@@ -66,8 +66,11 @@ def create_firefox_macos_capabilities():
         'debug': 'true',
         'networkLogs': 'true',
         'consoleLogs': 'verbose',
-        'seleniumVersion': '4.0.0',
-        'wsLocalSupport': 'false'
+        # REMOVED: 'seleniumVersion': '4.0.0',  ✅ Let BrowserStack choose
+        # REMOVED: 'wsLocalSupport': 'false',   ✅ Not needed, can cause issues
+        'idleTimeout': 300,                     ✅ ADDED: Prevent early timeout
+        'acceptSslCerts': 'true',              ✅ ADDED: Accept SSL certificates
+        'acceptInsecureCerts': 'true'          ✅ ADDED: Accept insecure certificates
     })
     return options
 

@@ -1,25 +1,23 @@
-pipeline {
+ pipeline {
     agent any
+    
+    environment {
+        BROWSERSTACK_USERNAME = credentials('browserstack-username')
+        BROWSERSTACK_ACCESS_KEY = credentials('browserstack-access-key')
+    }
     
     stages {
         stage('Checkout') {
             steps {
-                // Clean workspace before checkout
                 deleteDir()
-                
-                // Checkout code from repository
-                git branch: 'main', 
-                    url: 'https://github.com/leroylannister/selenium-browserstack-demo.git'
+                git 'https://github.com/leroylannister/selenium-browserstack-demo'
             }
         }
         
-        stage('Set up Python') {
+        stage('Set up Python Environment') {
             steps {
                 sh '''
-                    # Create virtual environment
                     python3 -m venv selenium_env
-                    
-                    # Activate virtual environment and install dependencies
                     source selenium_env/bin/activate
                     pip install --upgrade pip
                     pip install -r requirements.txt
@@ -27,17 +25,15 @@ pipeline {
             }
         }
         
-        stage('Run Selenium Tests') {
+        stage('Run Enhanced Selenium Tests') {
             steps {
-                // Use the BrowserStack plugin wrapper
-                browserstack(credentialsId: 'd165da47-3c30-4ac2-9ab8-0bd037b78e0e') {
-                    sh '''
-                        # Activate virtual environment and run tests
-                        source selenium_env/bin/activate
-                        
-                        # BrowserStack plugin sets these environment variables automatically
-                        python tests/test_bstackdemo.py
-                    '''
+                browserstack {
+                    steps {
+                        sh '''
+                            source selenium_env/bin/activate
+                            python corrected-test.py
+                        '''
+                    }
                 }
             }
         }
@@ -45,15 +41,14 @@ pipeline {
     
     post {
         always {
-            // Clean up workspace
             echo 'Cleaning up workspace...'
             deleteDir()
         }
         success {
-            echo 'Tests completed successfully!'
+            echo 'Enhanced tests completed successfully!'
         }
         failure {
-            echo 'Tests failed! Check the logs for details.'
+            echo 'Enhanced tests failed - check logs for details'
         }
     }
 }
