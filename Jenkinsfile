@@ -27,7 +27,7 @@
         
         stage('Run Enhanced Selenium Tests') {
             steps {
-                browserstack {
+                browserstack(credentialsId: 'browserstack-credentials') {
                     steps {
                         sh '''
                             source selenium_env/bin/activate
