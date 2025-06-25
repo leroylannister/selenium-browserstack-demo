@@ -1,692 +1,787 @@
-
 import os
+import logging
+import threading
+import time
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
+from selenium.common.exceptions import (
+    TimeoutException, 
+    NoSuchElementException, 
+    WebDriverException,
+    ElementClickInterceptedException
+)
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.remote.webdriver import WebDriver
 from dotenv import load_dotenv
-import threading
-import time
 import urllib3
 
 # Suppress OpenSSL warnings
 urllib3.disable_warnings(urllib3.exceptions.NotOpenSSLWarning)
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
-# BrowserStack authentication credentials
-BROWSERSTACK_USERNAME = os.getenv('BROWSERSTACK_USERNAME')
-BROWSERSTACK_ACCESS_KEY = os.getenv('BROWSERSTACK_ACCESS_KEY')
-
-# Test configuration
-URL = "https://bstackdemo.com/"
-USERNAME = "demouser"
-PASSWORD = "testingisfun99"
-
-# Test results storage
-test_results = {}
-results_lock = threading.Lock()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('test_execution.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 
-def create_chrome_windows_capabilities():
-    """Create Chrome on Windows 10 capabilities"""
-    options = ChromeOptions()
-    options.set_capability('browserName', 'Chrome')
-    options.set_capability('browserVersion', 'latest')
-    options.set_capability('bstack:options', {
-        'os': 'Windows',
-        'osVersion': '10',
-        'sessionName': 'Windows 10 Chrome Test',
-        'buildName': 'BStackDemo Complete Test Suite',
-        'projectName': 'E-commerce Full Flow Test',
-        'debug': 'true',
-        'networkLogs': 'true',
-        'consoleLogs': 'verbose',
-        'seleniumVersion': '4.0.0'
-    })
-    return options
-
-
-def create_firefox_macos_capabilities():
-    """Create Firefox on macOS Ventura capabilities - CORRECTED VERSION"""
-    options = FirefoxOptions()
-    options.set_capability('browserName', 'Firefox')
-    options.set_capability('browserVersion', 'latest')
-    options.set_capability('bstack:options', {
-        'os': 'OS X',
-        'osVersion': 'Ventura',
-        'sessionName': 'macOS Ventura Firefox Test',
-        'buildName': 'BStackDemo Complete Test Suite',
-        'projectName': 'E-commerce Full Flow Test',
-        'debug': 'true',
-        'networkLogs': 'true',
-        'consoleLogs': 'verbose',
-        # REMOVED: 'seleniumVersion': '4.0.0',  ✅ Let BrowserStack choose
-        # REMOVED: 'wsLocalSupport': 'false',   ✅ Not needed, can cause issues
-        'idleTimeout': 300,                     ✅ ADDED: Prevent early timeout
-        'acceptSslCerts': 'true',              ✅ ADDED: Accept SSL certificates
-        'acceptInsecureCerts': 'true'          ✅ ADDED: Accept insecure certificates
-    })
-    return options
-
-
-def create_android_capabilities():
-    """Create Samsung Galaxy S22 capabilities"""
-    options = ChromeOptions()
-    options.set_capability('bstack:options', {
-        'deviceName': 'Samsung Galaxy S22',
-        'realMobile': 'true',
-        'osVersion': '12.0',
-        'browserName': 'chrome',
-        'sessionName': 'Samsung Galaxy S22 Chrome Test',
-        'buildName': 'BStackDemo Complete Test Suite',
-        'projectName': 'E-commerce Full Flow Test',
-        'debug': 'true',
-        'networkLogs': 'true',
-        'consoleLogs': 'verbose',
-        'appiumVersion': '2.0.0'
-    })
-    return options
-
-
-def wait_and_click(driver, locator, description, timeout=20, use_js=False):
-    """Helper function to wait for element and click it with multiple strategies"""
-    wait = WebDriverWait(driver, timeout)
+@dataclass
+class TestConfig:
+    """Centralized test configuration"""
+    URL: str = "https://bstackdemo.com/"
+    USERNAME: str = "demouser"
+    PASSWORD: str = "testingisfun99"
     
-    try:
-        # Strategy 1: Standard click
-        element = wait.until(EC.element_to_be_clickable(locator))
-        if not use_js:
-            element.click()
-            print(f"    ✅ Clicked: {description}")
-            return True
-        else:
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-            time.sleep(0.5)
-            driver.execute_script("arguments[0].click();", element)
-            print(f"    ✅ JS Clicked: {description}")
-            return True
-    except:
-        # Strategy 2: JavaScript click fallback
-        try:
-            element = driver.find_element(*locator)
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-            time.sleep(0.5)
-            driver.execute_script("arguments[0].click();", element)
-            print(f"    ✅ JS Clicked (fallback): {description}")
-            return True
-        except:
-            # Strategy 3: ActionChains
+    # Timeouts
+    DEFAULT_TIMEOUT: int = 20
+    LOGIN_TIMEOUT: int = 30
+    PAGE_LOAD_TIMEOUT: int = 60
+    MOBILE_PAGE_LOAD_TIMEOUT: int = 90
+    
+    # Retry settings
+    MAX_INIT_RETRIES: int = 3
+    RETRY_DELAY: int = 5
+    
+    # BrowserStack credentials
+    BROWSERSTACK_USERNAME: str = os.getenv('BROWSERSTACK_USERNAME', '')
+    BROWSERSTACK_ACCESS_KEY: str = os.getenv('BROWSERSTACK_ACCESS_KEY', '')
+    
+    def __post_init__(self):
+        if not self.BROWSERSTACK_USERNAME or not self.BROWSERSTACK_ACCESS_KEY:
+            raise ValueError("BrowserStack credentials not found in environment variables")
+
+
+class BrowserStackCapabilities:
+    """Factory class for creating BrowserStack capabilities"""
+    
+    @staticmethod
+    def chrome_windows() -> Dict:
+        """Create Chrome on Windows 10 capabilities"""
+        return {
+            'browserName': 'Chrome',
+            'browserVersion': 'latest',
+            'bstack:options': {
+                'os': 'Windows',
+                'osVersion': '10',
+                'sessionName': 'Windows 10 Chrome Test',
+                'buildName': 'BStackDemo Complete Test Suite',
+                'projectName': 'E-commerce Full Flow Test',
+                'debug': True,
+                'networkLogs': True,
+                'consoleLogs': 'verbose'
+            }
+        }
+    
+    @staticmethod
+    def firefox_macos() -> Dict:
+        """Create Firefox on macOS Ventura capabilities"""
+        return {
+            'browserName': 'Firefox',
+            'browserVersion': 'latest',
+            'bstack:options': {
+                'os': 'OS X',
+                'osVersion': 'Ventura',
+                'sessionName': 'macOS Ventura Firefox Test',
+                'buildName': 'BStackDemo Complete Test Suite',
+                'projectName': 'E-commerce Full Flow Test',
+                'debug': True,
+                'networkLogs': True,
+                'consoleLogs': 'verbose',
+                'idleTimeout': 300,
+                'acceptSslCerts': True,
+                'acceptInsecureCerts': True
+            }
+        }
+    
+    @staticmethod
+    def android_chrome() -> Dict:
+        """Create Samsung Galaxy S22 capabilities"""
+        return {
+            'bstack:options': {
+                'deviceName': 'Samsung Galaxy S22',
+                'realMobile': True,
+                'osVersion': '12.0',
+                'browserName': 'chrome',
+                'sessionName': 'Samsung Galaxy S22 Chrome Test',
+                'buildName': 'BStackDemo Complete Test Suite',
+                'projectName': 'E-commerce Full Flow Test',
+                'debug': True,
+                'networkLogs': True,
+                'consoleLogs': 'verbose',
+                'appiumVersion': '2.0.0'
+            }
+        }
+
+
+class ElementInteractor:
+    """Helper class for element interactions"""
+    
+    def __init__(self, driver: WebDriver, config: TestConfig):
+        self.driver = driver
+        self.config = config
+        self.wait = WebDriverWait(driver, config.DEFAULT_TIMEOUT)
+    
+    def safe_click(self, locator: Tuple[str, str], description: str, 
+                   timeout: Optional[int] = None, use_js: bool = False) -> bool:
+        """Safely click an element with multiple strategies"""
+        timeout = timeout or self.config.DEFAULT_TIMEOUT
+        wait = WebDriverWait(self.driver, timeout)
+        
+        strategies = [
+            self._standard_click if not use_js else self._js_click,
+            self._js_click,
+            self._action_chains_click
+        ]
+        
+        for i, strategy in enumerate(strategies, 1):
             try:
-                element = driver.find_element(*locator)
-                ActionChains(driver).move_to_element(element).click().perform()
-                print(f"    ✅ ActionChains Clicked: {description}")
+                element = wait.until(EC.element_to_be_clickable(locator))
+                strategy(element)
+                logger.info(f"Successfully clicked {description} (strategy {i})")
                 return True
-            except Exception as e:
-                print(f"    ❌ Failed to click {description}: {str(e)}")
+            except (TimeoutException, NoSuchElementException, 
+                    WebDriverException, ElementClickInterceptedException) as e:
+                logger.warning(f"Click strategy {i} failed for {description}: {e}")
+                if i < len(strategies):
+                    time.sleep(1)
+                continue
+        
+        logger.error(f"All click strategies failed for {description}")
+        return False
+    
+    def _standard_click(self, element):
+        """Standard click method"""
+        element.click()
+    
+    def _js_click(self, element):
+        """JavaScript click method"""
+        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+        time.sleep(0.5)
+        self.driver.execute_script("arguments[0].click();", element)
+    
+    def _action_chains_click(self, element):
+        """ActionChains click method"""
+        ActionChains(self.driver).move_to_element(element).click().perform()
+    
+    def wait_for_element(self, locator: Tuple[str, str], description: str, 
+                        timeout: Optional[int] = None):
+        """Wait for element to be present"""
+        timeout = timeout or self.config.DEFAULT_TIMEOUT
+        try:
+            wait = WebDriverWait(self.driver, timeout)
+            element = wait.until(EC.presence_of_element_located(locator))
+            logger.info(f"Found element: {description}")
+            return element
+        except TimeoutException:
+            logger.error(f"Element not found: {description}")
+            return None
+    
+    def select_dropdown_option(self, dropdown_id: str, option_text: str, 
+                              description: str, is_mobile: bool = False) -> bool:
+        """Enhanced dropdown selection for React Select components"""
+        try:
+            logger.info(f"Selecting {description}: {option_text}")
+            
+            # Click dropdown to open
+            if not self._open_dropdown(dropdown_id, description):
                 return False
-
-
-def wait_for_element(driver, locator, description, timeout=20):
-    """Wait for element to be present"""
-    try:
-        wait = WebDriverWait(driver, timeout)
-        element = wait.until(EC.presence_of_element_located(locator))
-        print(f"    ✅ Found: {description}")
-        return element
-    except TimeoutException:
-        print(f"    ❌ Not found: {description}")
-        return None
-
-
-def select_dropdown_option(driver, dropdown_id, option_text, description, is_mobile=False):
-    """Enhanced dropdown selection that handles React Select components"""
-    try:
-        print(f"    🔄 Selecting {description}...")
-        
-        # Click the dropdown to open it
-        dropdown_clicked = False
-        
-        # Try multiple selectors for the dropdown
-        dropdown_selectors = [
+            
+            # Wait for dropdown to open
+            time.sleep(3 if is_mobile else 2)
+            
+            # Select option using multiple strategies
+            return self._select_option(option_text, description)
+            
+        except Exception as e:
+            logger.error(f"Failed to select {description}: {e}")
+            return False
+    
+    def _open_dropdown(self, dropdown_id: str, description: str) -> bool:
+        """Open dropdown using multiple selectors"""
+        selectors = [
             (By.ID, dropdown_id),
             (By.CSS_SELECTOR, f"#{dropdown_id}"),
             (By.CSS_SELECTOR, f"div#{dropdown_id}"),
             (By.XPATH, f"//div[@id='{dropdown_id}']")
         ]
         
-        for selector in dropdown_selectors:
-            if wait_and_click(driver, selector, f"{description} dropdown", use_js=True):
-                dropdown_clicked = True
-                break
+        for selector in selectors:
+            if self.safe_click(selector, f"{description} dropdown", use_js=True):
+                return True
         
-        if not dropdown_clicked:
-            raise Exception(f"Could not open {description} dropdown")
+        logger.error(f"Could not open {description} dropdown")
+        return False
+    
+    def _select_option(self, option_text: str, description: str) -> bool:
+        """Select option from opened dropdown"""
+        selection_strategies = [
+            self._select_by_react_option,
+            self._select_by_text_content,
+            self._select_by_generic_selectors,
+            self._select_first_available
+        ]
         
-        # Wait for dropdown to fully open
-        time.sleep(3 if is_mobile else 2)
+        for strategy in selection_strategies:
+            if strategy(option_text, description):
+                time.sleep(1)
+                return True
         
-        # Try to find and click the option
-        option_clicked = False
-        
-        # Strategy 1: Look for all divs that might be dropdown options
+        logger.error(f"Could not select {option_text}")
+        return False
+    
+    def _select_by_react_option(self, option_text: str, description: str) -> bool:
+        """Select using React Select option elements"""
         try:
-            # Get all potential option elements
-            option_elements = driver.find_elements(By.CSS_SELECTOR, "div[id*='react-select'][id*='option']")
+            option_elements = self.driver.find_elements(
+                By.CSS_SELECTOR, "div[id*='react-select'][id*='option']"
+            )
             
             for element in option_elements:
-                try:
-                    if option_text in element.text or element.text == option_text:
-                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-                        time.sleep(0.5)
-                        driver.execute_script("arguments[0].click();", element)
-                        option_clicked = True
-                        print(f"    ✅ Selected {option_text} from options list")
-                        break
-                except:
-                    continue
-        except:
-            pass
-        
-        # Strategy 2: Click by text content
-        if not option_clicked:
-            try:
-                xpath = f"//div[contains(text(), '{option_text}')]"
-                elements = driver.find_elements(By.XPATH, xpath)
-                
-                # Try to click the visible one
-                for element in elements:
-                    try:
-                        if element.is_displayed():
-                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-                            time.sleep(0.5)
-                            driver.execute_script("arguments[0].click();", element)
-                            option_clicked = True
-                            print(f"    ✅ Selected {option_text} by text")
-                            break
-                    except:
-                        continue
-            except:
-                pass
-        
-        # Strategy 3: Try generic menu item selectors
-        if not option_clicked:
-            generic_selectors = [
-                f"//div[@role='option'][contains(., '{option_text}')]",
-                f"//div[@class='css-1n7v3ny-option'][contains(., '{option_text}')]",
-                f"//div[contains(@class, 'option')][contains(., '{option_text}')]",
-                f"//*[contains(., '{option_text}')][contains(@id, 'option')]"
-            ]
-            
-            for selector in generic_selectors:
-                try:
-                    element = driver.find_element(By.XPATH, selector)
-                    driver.execute_script("arguments[0].click();", element)
-                    option_clicked = True
-                    print(f"    ✅ Selected {option_text} using generic selector")
-                    break
-                except:
-                    continue
-        
-        if not option_clicked:
-            # Last resort: click the first available option
-            try:
-                first_option = driver.find_element(By.CSS_SELECTOR, "[id*='option-0']")
-                driver.execute_script("arguments[0].click();", first_option)
-                print(f"    ⚠️  Clicked first available option (fallback)")
-                option_clicked = True
-            except:
-                pass
-        
-        if option_clicked:
-            time.sleep(1)
-            return True
-        else:
-            raise Exception(f"Could not select {option_text}")
-            
-    except Exception as e:
-        print(f"    ❌ Failed to select {description}: {str(e)}")
+                if option_text in element.text or element.text == option_text:
+                    self._js_click(element)
+                    logger.info(f"Selected {option_text} from React options")
+                    return True
+        except Exception as e:
+            logger.debug(f"React option selection failed: {e}")
         return False
-
-
-def login_to_site(driver, session_name, is_mobile=False):
-    """Perform login to BStackDemo with enhanced dropdown handling"""
-    try:
-        print(f"\n[{session_name}] 🔐 Starting login process...")
+    
+    def _select_by_text_content(self, option_text: str, description: str) -> bool:
+        """Select by text content"""
+        try:
+            xpath = f"//div[contains(text(), '{option_text}')]"
+            elements = self.driver.find_elements(By.XPATH, xpath)
+            
+            for element in elements:
+                if element.is_displayed():
+                    self._js_click(element)
+                    logger.info(f"Selected {option_text} by text")
+                    return True
+        except Exception as e:
+            logger.debug(f"Text content selection failed: {e}")
+        return False
+    
+    def _select_by_generic_selectors(self, option_text: str, description: str) -> bool:
+        """Select using generic selectors"""
+        selectors = [
+            f"//div[@role='option'][contains(., '{option_text}')]",
+            f"//div[@class='css-1n7v3ny-option'][contains(., '{option_text}')]",
+            f"//div[contains(@class, 'option')][contains(., '{option_text}')]",
+            f"//*[contains(., '{option_text}')][contains(@id, 'option')]"
+        ]
         
-        # Wait for initial page load
-        time.sleep(5 if is_mobile else 3)
-        
-        # Click Sign In
-        if not wait_and_click(driver, (By.ID, "signin"), "Sign In button", timeout=30):
-            raise Exception("Failed to click Sign In")
-        
-        time.sleep(5 if is_mobile else 3)
-        
-        # Select username using enhanced dropdown handler
-        if not select_dropdown_option(driver, "username", USERNAME, "username", is_mobile):
-            raise Exception("Failed to select username")
-        
-        # Select password using enhanced dropdown handler
-        if not select_dropdown_option(driver, "password", PASSWORD, "password", is_mobile):
-            raise Exception("Failed to select password")
-        
-        time.sleep(2)
-        
-        # Click login button
-        if not wait_and_click(driver, (By.ID, "login-btn"), "Login button"):
-            raise Exception("Failed to click login button")
-        
-        # Wait for login to complete
-        print(f"[{session_name}] ⏳ Waiting for login to complete...")
-        time.sleep(8 if is_mobile else 5)
-        
-        # Verify login success
-        if wait_for_element(driver, (By.CLASS_NAME, "shelf-container"), "Products shelf", timeout=30):
-            print(f"[{session_name}] ✅ Login successful!")
+        for selector in selectors:
+            try:
+                element = self.driver.find_element(By.XPATH, selector)
+                self.driver.execute_script("arguments[0].click();", element)
+                logger.info(f"Selected {option_text} using generic selector")
+                return True
+            except Exception:
+                continue
+        return False
+    
+    def _select_first_available(self, option_text: str, description: str) -> bool:
+        """Fallback: select first available option"""
+        try:
+            first_option = self.driver.find_element(By.CSS_SELECTOR, "[id*='option-0']")
+            self.driver.execute_script("arguments[0].click();", first_option)
+            logger.warning(f"Selected first available option as fallback")
             return True
-        else:
-            # Check if we're on the main page with products
+        except Exception:
+            return False
+
+
+class ECommerceTestSuite:
+    """Main test suite class"""
+    
+    def __init__(self, config: TestConfig):
+        self.config = config
+        self.test_results: Dict[str, str] = {}
+        self.results_lock = threading.Lock()
+    
+    def create_driver(self, capabilities: Dict, session_name: str) -> Optional[WebDriver]:
+        """Create WebDriver with retry logic"""
+        max_retries = self.config.MAX_INIT_RETRIES if "Firefox" in session_name else 1
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"[{session_name}] Initializing WebDriver (attempt {attempt + 1})")
+                
+                driver = webdriver.Remote(
+                    command_executor=f'https://{self.config.BROWSERSTACK_USERNAME}:'
+                                   f'{self.config.BROWSERSTACK_ACCESS_KEY}@hub-cloud.browserstack.com/wd/hub',
+                    desired_capabilities=capabilities
+                )
+                
+                # Set timeouts
+                is_mobile = 'deviceName' in capabilities.get('bstack:options', {})
+                timeout = self.config.MOBILE_PAGE_LOAD_TIMEOUT if is_mobile else self.config.PAGE_LOAD_TIMEOUT
+                
+                driver.set_page_load_timeout(timeout)
+                driver.implicitly_wait(10)
+                
+                logger.info(f"[{session_name}] WebDriver initialized successfully")
+                return driver
+                
+            except Exception as e:
+                logger.error(f"[{session_name}] Initialization attempt {attempt + 1} failed: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(self.config.RETRY_DELAY)
+                else:
+                    raise e
+        
+        return None
+    
+    def login_to_site(self, driver: WebDriver, interactor: ElementInteractor, 
+                     session_name: str, is_mobile: bool = False) -> bool:
+        """Perform login to BStackDemo"""
+        try:
+            logger.info(f"[{session_name}] Starting login process")
+            
+            # Wait for initial page load
+            time.sleep(5 if is_mobile else 3)
+            
+            # Click Sign In
+            if not interactor.safe_click((By.ID, "signin"), "Sign In button", 
+                                       timeout=self.config.LOGIN_TIMEOUT):
+                raise Exception("Failed to click Sign In")
+            
+            time.sleep(5 if is_mobile else 3)
+            
+            # Select username and password
+            if not interactor.select_dropdown_option("username", self.config.USERNAME, 
+                                                   "username", is_mobile):
+                raise Exception("Failed to select username")
+            
+            if not interactor.select_dropdown_option("password", self.config.PASSWORD, 
+                                                   "password", is_mobile):
+                raise Exception("Failed to select password")
+            
+            time.sleep(2)
+            
+            # Click login button
+            if not interactor.safe_click((By.ID, "login-btn"), "Login button"):
+                raise Exception("Failed to click login button")
+            
+            # Verify login success
+            logger.info(f"[{session_name}] Waiting for login to complete")
+            time.sleep(8 if is_mobile else 5)
+            
+            if self._verify_login_success(driver, session_name):
+                logger.info(f"[{session_name}] Login successful")
+                return True
+            else:
+                raise Exception("Login verification failed")
+                
+        except Exception as e:
+            logger.error(f"[{session_name}] Login failed: {e}")
+            return False
+    
+    def _verify_login_success(self, driver: WebDriver, session_name: str) -> bool:
+        """Verify login was successful"""
+        try:
+            # Check for products shelf
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "shelf-container"))
+            )
+            return True
+        except TimeoutException:
+            # Alternative check: look for products
             try:
                 products = driver.find_elements(By.CSS_SELECTOR, ".shelf-item")
-                if len(products) > 0:
-                    print(f"[{session_name}] ✅ Login successful (found products)!")
-                    return True
-            except:
-                pass
-            
-            raise Exception("Login verification failed")
-            
-    except Exception as e:
-        print(f"[{session_name}] ❌ Login failed: {str(e)}")
-        return False
-
-
-def filter_samsung_products(driver, session_name, is_mobile=False):
-    """Filter products to show only Samsung devices"""
-    try:
-        print(f"\n[{session_name}] 🔍 Filtering for Samsung products...")
-        
-        time.sleep(3)
-        
-        # Scroll to top to ensure filters are visible
-        driver.execute_script("window.scrollTo(0, 0);")
-        time.sleep(2)
-        
-        # Find and click Samsung checkbox - try multiple approaches
-        samsung_clicked = False
-        
-        # Approach 1: Find all checkboxes and look for Samsung
+                return len(products) > 0
+            except Exception:
+                return False
+    
+    def filter_samsung_products(self, driver: WebDriver, interactor: ElementInteractor, 
+                              session_name: str, is_mobile: bool = False) -> bool:
+        """Filter products to show only Samsung devices"""
         try:
-            # Find all vendor checkboxes
-            vendor_labels = driver.find_elements(By.CSS_SELECTOR, ".filters-available-size label")
+            logger.info(f"[{session_name}] Filtering for Samsung products")
             
-            for label in vendor_labels:
-                try:
-                    label_text = label.text
-                    if "Samsung" in label_text:
-                        # Click the checkbox within this label
-                        checkbox = label.find_element(By.CSS_SELECTOR, "span.checkmark")
-                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", checkbox)
-                        time.sleep(0.5)
-                        driver.execute_script("arguments[0].click();", checkbox)
-                        samsung_clicked = True
-                        print(f"[{session_name}] ✅ Clicked Samsung checkbox")
-                        break
-                except:
-                    continue
-        except:
-            pass
-        
-        # Approach 2: Direct checkbox selector
-        if not samsung_clicked:
-            try:
-                # Look for Samsung in the vendor filter section
-                samsung_checkbox = driver.find_element(By.XPATH, "//span[text()='Samsung']/preceding-sibling::span[@class='checkmark']")
-                driver.execute_script("arguments[0].click();", samsung_checkbox)
-                samsung_clicked = True
-                print(f"[{session_name}] ✅ Clicked Samsung checkbox (direct)")
-            except:
-                pass
-        
-        # Approach 3: Click Samsung text
-        if not samsung_clicked:
-            try:
-                samsung_text = driver.find_element(By.XPATH, "//span[text()='Samsung']")
-                driver.execute_script("arguments[0].click();", samsung_text)
-                samsung_clicked = True
-                print(f"[{session_name}] ✅ Clicked Samsung text")
-            except:
-                pass
-        
-        # Approach 4: Click the parent label
-        if not samsung_clicked:
-            try:
-                samsung_label = driver.find_element(By.XPATH, "//label[contains(., 'Samsung')]")
-                driver.execute_script("arguments[0].click();", samsung_label)
-                samsung_clicked = True
-                print(f"[{session_name}] ✅ Clicked Samsung label")
-            except:
-                pass
-        
-        if not samsung_clicked:
-            raise Exception("Failed to click Samsung filter")
-        
-        # Wait for products to filter
-        time.sleep(4)
-        print(f"[{session_name}] ✅ Samsung filter applied")
-        return True
-        
-    except Exception as e:
-        print(f"[{session_name}] ❌ Failed to filter Samsung products: {str(e)}")
-        return False
-
-
-def favorite_galaxy_s20_plus(driver, session_name, is_mobile=False):
-    """Find and favorite the Galaxy S20+ device"""
-    try:
-        print(f"\n[{session_name}] ❤️ Adding Galaxy S20+ to favorites...")
-        
-        time.sleep(3)
-        
-        # Find the Galaxy S20+ product
-        galaxy_found = False
-        
-        # Get all product containers
-        products = driver.find_elements(By.CSS_SELECTOR, ".shelf-item")
-        print(f"[{session_name}] Found {len(products)} products")
-        
-        for product in products:
-            try:
-                # Get product title
-                title_element = product.find_element(By.CSS_SELECTOR, ".shelf-item__title")
-                product_title = title_element.text
-                print(f"[{session_name}] Checking product: {product_title}")
-                
-                if "Galaxy S20" in product_title:
-                    print(f"[{session_name}] 📱 Found Galaxy S20+")
-                    
-                    # Scroll product into view
-                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", product)
-                    time.sleep(2)
-                    
-                    # Find the favorite button within this product
-                    try:
-                        # Look for the favorite button/icon
-                        favorite_button = product.find_element(By.CSS_SELECTOR, ".shelf-stopper")
-                        driver.execute_script("arguments[0].click();", favorite_button)
-                        galaxy_found = True
-                        print(f"[{session_name}] ✅ Clicked favorite button for Galaxy S20+")
-                        break
-                    except:
-                        # Try alternative selector
-                        try:
-                            favorite_button = product.find_element(By.CSS_SELECTOR, "button")
-                            driver.execute_script("arguments[0].click();", favorite_button)
-                            galaxy_found = True
-                            print(f"[{session_name}] ✅ Clicked favorite button (alt) for Galaxy S20+")
-                            break
-                        except:
-                            print(f"[{session_name}] ⚠️ Could not find favorite button in product")
-                            
-            except Exception as product_error:
-                continue
-        
-        if not galaxy_found:
-            raise Exception("Could not find or favorite Galaxy S20+")
-        
-        time.sleep(3)
-        return True
-        
-    except Exception as e:
-        print(f"[{session_name}] ❌ Failed to favorite Galaxy S20+: {str(e)}")
-        return False
-
-
-def verify_favorites(driver, session_name, is_mobile=False):
-    """Navigate to favorites page and verify Galaxy S20+ is there"""
-    try:
-        print(f"\n[{session_name}] 📋 Verifying favorites...")
-        
-        time.sleep(3)
-        
-        # Find and click favorites link
-        favorites_clicked = False
-        
-        # Look for the favorites counter/badge first (usually shows number of favorites)
-        try:
-            favorites_badge = driver.find_element(By.CSS_SELECTOR, ".navbar__cart__items__count, .MuiBadge-badge, .badge")
-            # Click the parent element (usually the link)
-            parent = favorites_badge.find_element(By.XPATH, "..")
-            driver.execute_script("arguments[0].click();", parent)
-            favorites_clicked = True
-            print(f"[{session_name}] ✅ Clicked favorites badge")
-        except:
-            pass
-        
-        # Try different selectors for the favorites link
-        if not favorites_clicked:
-            selectors = [
-                "a[href='/favourites']",
-                "a[href='/favorites']",
-                "//a[contains(@href, 'favourite')]",
-                "//a[contains(@href, 'favorite')]",
-                ".navbar-nav a[href*='fav']",
-                "//a[contains(., 'Favourite')]",
-                "//a[contains(., 'Favorite')]"
+            time.sleep(3)
+            driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(2)
+            
+            # Multiple strategies to find and click Samsung checkbox
+            samsung_strategies = [
+                self._click_samsung_checkbox_by_label,
+                self._click_samsung_checkbox_direct,
+                self._click_samsung_text,
+                self._click_samsung_label
             ]
             
-            for selector in selectors:
+            for strategy in samsung_strategies:
+                if strategy(driver, session_name):
+                    time.sleep(4)
+                    logger.info(f"[{session_name}] Samsung filter applied")
+                    return True
+            
+            raise Exception("Failed to apply Samsung filter")
+            
+        except Exception as e:
+            logger.error(f"[{session_name}] Failed to filter Samsung products: {e}")
+            return False
+    
+    def _click_samsung_checkbox_by_label(self, driver: WebDriver, session_name: str) -> bool:
+        """Click Samsung checkbox by finding labels"""
+        try:
+            vendor_labels = driver.find_elements(By.CSS_SELECTOR, ".filters-available-size label")
+            for label in vendor_labels:
+                if "Samsung" in label.text:
+                    checkbox = label.find_element(By.CSS_SELECTOR, "span.checkmark")
+                    driver.execute_script("arguments[0].click();", checkbox)
+                    logger.info(f"[{session_name}] Clicked Samsung checkbox")
+                    return True
+        except Exception:
+            pass
+        return False
+    
+    def _click_samsung_checkbox_direct(self, driver: WebDriver, session_name: str) -> bool:
+        """Click Samsung checkbox directly"""
+        try:
+            samsung_checkbox = driver.find_element(
+                By.XPATH, "//span[text()='Samsung']/preceding-sibling::span[@class='checkmark']"
+            )
+            driver.execute_script("arguments[0].click();", samsung_checkbox)
+            logger.info(f"[{session_name}] Clicked Samsung checkbox (direct)")
+            return True
+        except Exception:
+            pass
+        return False
+    
+    def _click_samsung_text(self, driver: WebDriver, session_name: str) -> bool:
+        """Click Samsung text"""
+        try:
+            samsung_text = driver.find_element(By.XPATH, "//span[text()='Samsung']")
+            driver.execute_script("arguments[0].click();", samsung_text)
+            logger.info(f"[{session_name}] Clicked Samsung text")
+            return True
+        except Exception:
+            pass
+        return False
+    
+    def _click_samsung_label(self, driver: WebDriver, session_name: str) -> bool:
+        """Click Samsung label"""
+        try:
+            samsung_label = driver.find_element(By.XPATH, "//label[contains(., 'Samsung')]")
+            driver.execute_script("arguments[0].click();", samsung_label)
+            logger.info(f"[{session_name}] Clicked Samsung label")
+            return True
+        except Exception:
+            pass
+        return False
+    
+    def favorite_galaxy_s20_plus(self, driver: WebDriver, session_name: str, 
+                                is_mobile: bool = False) -> bool:
+        """Find and favorite the Galaxy S20+ device"""
+        try:
+            logger.info(f"[{session_name}] Adding Galaxy S20+ to favorites")
+            
+            time.sleep(3)
+            products = driver.find_elements(By.CSS_SELECTOR, ".shelf-item")
+            logger.info(f"[{session_name}] Found {len(products)} products")
+            
+            for product in products:
                 try:
-                    if selector.startswith("//"):
-                        element = driver.find_element(By.XPATH, selector)
-                    else:
-                        element = driver.find_element(By.CSS_SELECTOR, selector)
+                    title_element = product.find_element(By.CSS_SELECTOR, ".shelf-item__title")
+                    product_title = title_element.text
                     
-                    driver.execute_script("arguments[0].click();", element)
-                    favorites_clicked = True
-                    print(f"[{session_name}] ✅ Clicked favorites link")
-                    break
-                except:
+                    if "Galaxy S20" in product_title:
+                        logger.info(f"[{session_name}] Found Galaxy S20+")
+                        
+                        # Scroll product into view
+                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", product)
+                        time.sleep(2)
+                        
+                        # Find and click favorite button
+                        if self._click_favorite_button(driver, product, session_name):
+                            time.sleep(3)
+                            return True
+                            
+                except Exception:
                     continue
+            
+            raise Exception("Could not find or favorite Galaxy S20+")
+            
+        except Exception as e:
+            logger.error(f"[{session_name}] Failed to favorite Galaxy S20+: {e}")
+            return False
+    
+    def _click_favorite_button(self, driver: WebDriver, product, session_name: str) -> bool:
+        """Click favorite button for a product"""
+        selectors = [".shelf-stopper", "button"]
         
-        if not favorites_clicked:
-            raise Exception("Could not find favorites link")
+        for selector in selectors:
+            try:
+                favorite_button = product.find_element(By.CSS_SELECTOR, selector)
+                driver.execute_script("arguments[0].click();", favorite_button)
+                logger.info(f"[{session_name}] Clicked favorite button for Galaxy S20+")
+                return True
+            except Exception:
+                continue
         
-        # Wait for favorites page to load
-        time.sleep(5)
+        logger.warning(f"[{session_name}] Could not find favorite button")
+        return False
+    
+    def verify_favorites(self, driver: WebDriver, interactor: ElementInteractor, 
+                        session_name: str, is_mobile: bool = False) -> bool:
+        """Navigate to favorites page and verify Galaxy S20+ is there"""
+        try:
+            logger.info(f"[{session_name}] Verifying favorites")
+            
+            time.sleep(3)
+            
+            # Find and click favorites link
+            if not self._navigate_to_favorites(driver, session_name):
+                raise Exception("Could not navigate to favorites")
+            
+            # Wait for favorites page to load
+            time.sleep(5)
+            
+            # Verify Galaxy S20+ is in favorites
+            return self._verify_galaxy_in_favorites(driver, session_name)
+            
+        except Exception as e:
+            logger.error(f"[{session_name}] Failed to verify favorites: {e}")
+            return False
+    
+    def _navigate_to_favorites(self, driver: WebDriver, session_name: str) -> bool:
+        """Navigate to favorites page"""
+        # Try favorites badge first
+        try:
+            favorites_badge = driver.find_element(
+                By.CSS_SELECTOR, ".navbar__cart__items__count, .MuiBadge-badge, .badge"
+            )
+            parent = favorites_badge.find_element(By.XPATH, "..")
+            driver.execute_script("arguments[0].click();", parent)
+            logger.info(f"[{session_name}] Clicked favorites badge")
+            return True
+        except Exception:
+            pass
         
-        # Verify Galaxy S20+ is in favorites
-        print(f"[{session_name}] 🔍 Looking for Galaxy S20+ in favorites...")
+        # Try direct favorites links
+        selectors = [
+            "a[href='/favourites']",
+            "a[href='/favorites']",
+            "//a[contains(@href, 'favourite')]",
+            "//a[contains(@href, 'favorite')]",
+            ".navbar-nav a[href*='fav']",
+            "//a[contains(., 'Favourite')]",
+            "//a[contains(., 'Favorite')]"
+        ]
         
-        # Check if Galaxy S20+ is present
+        for selector in selectors:
+            try:
+                if selector.startswith("//"):
+                    element = driver.find_element(By.XPATH, selector)
+                else:
+                    element = driver.find_element(By.CSS_SELECTOR, selector)
+                
+                driver.execute_script("arguments[0].click();", element)
+                logger.info(f"[{session_name}] Clicked favorites link")
+                return True
+            except Exception:
+                continue
+        
+        return False
+    
+    def _verify_galaxy_in_favorites(self, driver: WebDriver, session_name: str) -> bool:
+        """Verify Galaxy S20+ is in favorites"""
+        logger.info(f"[{session_name}] Looking for Galaxy S20+ in favorites")
+        
         page_source = driver.page_source
         
         if "Galaxy S20" in page_source:
-            print(f"[{session_name}] ✅ Galaxy S20+ found in favorites!")
+            logger.info(f"[{session_name}] Galaxy S20+ found in favorites!")
             
-            # Try to find the actual product element for additional verification
+            # Additional verification
             try:
                 products = driver.find_elements(By.CSS_SELECTOR, ".shelf-item__title, .product-title, p")
                 for product in products:
                     if "Galaxy S20" in product.text:
-                        print(f"[{session_name}] ✅ Confirmed: Galaxy S20+ is displayed in favorites")
+                        logger.info(f"[{session_name}] Confirmed: Galaxy S20+ is displayed in favorites")
                         return True
-            except:
-                # If we found it in page source, that's good enough
+            except Exception:
+                # Page source check was sufficient
                 return True
         
         # Check if favorites is empty
-        if "no products" in page_source.lower() or "empty" in page_source.lower():
+        if any(term in page_source.lower() for term in ["no products", "empty"]):
             raise Exception("Favorites page is empty - product was not added")
         
         raise Exception("Galaxy S20+ not found in favorites")
-        
-    except Exception as e:
-        print(f"[{session_name}] ❌ Failed to verify favorites: {str(e)}")
-        return False
-
-
-def run_complete_test(capability):
-    """Run the complete test flow"""
-    driver = None
-    session_name = capability.capabilities.get('bstack:options', {}).get('sessionName', 'Unknown')
     
-    try:
-        print(f"\n{'='*60}")
-        print(f"🚀 STARTING TEST: {session_name}")
-        print(f"{'='*60}")
+    def run_complete_test(self, capabilities: Dict) -> bool:
+        """Run the complete test flow"""
+        driver = None
+        session_name = capabilities.get('bstack:options', {}).get('sessionName', 'Unknown')
         
-        # Detect if mobile
-        caps_dict = capability.capabilities.get('bstack:options', {})
-        is_mobile = 'deviceName' in caps_dict
+        try:
+            logger.info(f"{'='*60}")
+            logger.info(f"🚀 STARTING TEST: {session_name}")
+            logger.info(f"{'='*60}")
+            
+            # Detect if mobile
+            is_mobile = 'deviceName' in capabilities.get('bstack:options', {})
+            
+            # Initialize WebDriver
+            driver = self.create_driver(capabilities, session_name)
+            if not driver:
+                raise Exception("Failed to initialize WebDriver")
+            
+            # Create element interactor
+            interactor = ElementInteractor(driver, self.config)
+            
+            # Navigate to site
+            logger.info(f"[{session_name}] Navigating to {self.config.URL}")
+            driver.get(self.config.URL)
+            
+            # Execute test steps
+            test_steps = [
+                ("Login", lambda: self.login_to_site(driver, interactor, session_name, is_mobile)),
+                ("Filter Samsung", lambda: self.filter_samsung_products(driver, interactor, session_name, is_mobile)),
+                ("Favorite Galaxy S20+", lambda: self.favorite_galaxy_s20_plus(driver, session_name, is_mobile)),
+                ("Verify Favorites", lambda: self.verify_favorites(driver, interactor, session_name, is_mobile))
+            ]
+            
+            for step_name, step_func in test_steps:
+                logger.info(f"[{session_name}] Executing step: {step_name}")
+                if not step_func():
+                    raise Exception(f"{step_name} failed")
+            
+            # Test successful
+            logger.info(f"[{session_name}] 🎉 ALL TESTS PASSED!")
+            
+            # Mark test as passed in BrowserStack
+            driver.execute_script(
+                'browserstack_executor: {"action": "setSessionStatus", '
+                '"arguments": {"status":"passed", "reason": "All test steps completed successfully"}}'
+            )
+            
+            # Store result
+            with self.results_lock:
+                self.test_results[session_name] = "PASSED"
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"[{session_name}] ❌ TEST FAILED: {e}")
+            
+            # Mark test as failed in BrowserStack
+            if driver:
+                try:
+                    driver.execute_script(
+                        f'browserstack_executor: {{"action": "setSessionStatus", '
+                        f'"arguments": {{"status":"failed", "reason": "{str(e)[:100]}"}}}}'
+                    )
+                except Exception:
+                    pass
+            
+            # Store result
+            with self.results_lock:
+                self.test_results[session_name] = f"FAILED: {str(e)}"
+            
+            return False
+            
+        finally:
+            if driver:
+                logger.info(f"[{session_name}] Closing browser session")
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+    
+    def run_parallel_tests(self) -> bool:
+        """Run tests in parallel across multiple browsers"""
+        logger.info("\n" + "="*80)
+        logger.info("🧪 BROWSERSTACK E-COMMERCE TEST SUITE")
+        logger.info("📋 Test Requirements:")
+        logger.info("   1. Login with demouser/testingisfun99")
+        logger.info("   2. Filter products to show Samsung devices")
+        logger.info("   3. Favorite the Galaxy S20+ device")
+        logger.info("   4. Verify Galaxy S20+ appears in favorites")
+        logger.info("\n🌐 Running on:")
+        logger.info("   • Windows 10 Chrome")
+        logger.info("   • macOS Ventura Firefox")
+        logger.info("   • Samsung Galaxy S22")
+        logger.info("="*80)
         
-        # Initialize WebDriver with retry logic for Firefox
-        print(f"[{session_name}] 🔧 Initializing WebDriver...")
+        # Create capabilities
+        capabilities_list = [
+            BrowserStackCapabilities.chrome_windows(),
+            BrowserStackCapabilities.firefox_macos(),
+            BrowserStackCapabilities.android_chrome()
+        ]
         
-        max_retries = 3 if "Firefox" in session_name else 1
+        # Run tests in parallel
+        threads = []
         
-        for attempt in range(max_retries):
-            try:
-                driver = webdriver.Remote(
-                    command_executor=f'https://{BROWSERSTACK_USERNAME}:{BROWSERSTACK_ACCESS_KEY}@hub-cloud.browserstack.com/wd/hub',
-                    options=capability
-                )
-                print(f"[{session_name}] ✅ WebDriver initialized successfully")
-                break
-            except Exception as init_error:
-                if attempt < max_retries - 1:
-                    print(f"[{session_name}] ⚠️ Initialization attempt {attempt + 1} failed, retrying...")
-                    time.sleep(5)
-                else:
-                    raise init_error
+        for cap in capabilities_list:
+            thread = threading.Thread(target=self.run_complete_test, args=(cap,))
+            thread.start()
+            threads.append(thread)
         
-        # Set timeouts
-        driver.set_page_load_timeout(90 if is_mobile else 60)
-        driver.implicitly_wait(10)
+        # Wait for all tests to complete
+        for thread in threads:
+            thread.join()
         
-        # Navigate to site
-        print(f"[{session_name}] 🌐 Navigating to {URL}")
-        driver.get(URL)
+        # Print summary
+        return self._print_test_summary()
+    
+    def _print_test_summary(self) -> bool:
+        """Print test results summary"""
+        logger.info("\n" + "="*80)
+        logger.info("📊 TEST RESULTS SUMMARY")
+        logger.info("="*80)
         
-        # Execute test steps
-        test_passed = True
+        all_passed = True
+        for test_name, result in self.test_results.items():
+            status = "✅ PASSED" if result == "PASSED" else "❌ FAILED"
+            logger.info(f"{test_name}: {status}")
+            if result != "PASSED":
+                logger.info(f"   Error: {result}")
+                all_passed = False
         
-        # Step 1: Login
-        if not login_to_site(driver, session_name, is_mobile):
-            test_passed = False
-            raise Exception("Login failed")
+        logger.info("\n✨ Test suite execution completed!")
+        logger.info("📈 Check BrowserStack dashboard for detailed results")
+        logger.info("="*80)
         
-        # Step 2: Filter for Samsung products
-        if not filter_samsung_products(driver, session_name, is_mobile):
-            test_passed = False
-            raise Exception("Failed to filter Samsung products")
-        
-        # Step 3: Favorite Galaxy S20+
-        if not favorite_galaxy_s20_plus(driver, session_name, is_mobile):
-            test_passed = False
-            raise Exception("Failed to favorite Galaxy S20+")
-        
-        # Step 4: Verify favorites
-        if not verify_favorites(driver, session_name, is_mobile):
-            test_passed = False
-            raise Exception("Failed to verify favorites")
-        
-        # Test successful
-        print(f"\n[{session_name}] 🎉 ALL TESTS PASSED!")
-        
-        # Mark test as passed in BrowserStack
-        driver.execute_script('browserstack_executor: {"action": "setSessionStatus", "arguments": {"status":"passed", "reason": "All test steps completed successfully"}}')
-        
-        # Store result
-        with results_lock:
-            test_results[session_name] = "PASSED"
-        
-        return True
-        
-    except Exception as e:
-        print(f"\n[{session_name}] ❌ TEST FAILED: {str(e)}")
-        
-        # Mark test as failed in BrowserStack
-        if driver:
-            try:
-                driver.execute_script(f'browserstack_executor: {{"action": "setSessionStatus", "arguments": {{"status":"failed", "reason": "{str(e)[:100]}"}}}}')
-            except:
-                pass
-        
-        # Store result
-        with results_lock:
-            test_results[session_name] = f"FAILED: {str(e)}"
-        
-        return False
-        
-    finally:
-        if driver:
-            print(f"[{session_name}] 🧹 Closing browser session")
-            try:
-                driver.quit()
-            except:
-                pass
+        return all_passed
 
 
 def main():
     """Main execution function"""
-    print("\n" + "="*80)
-    print("🧪 BROWSERSTACK E-COMMERCE TEST SUITE")
-    print("📋 Test Requirements:")
-    print("   1. Login with demouser/testingisfun99")
-    print("   2. Filter products to show Samsung devices")
-    print("   3. Favorite the Galaxy S20+ device")
-    print("   4. Verify Galaxy S20+ appears in favorites")
-    print("\n🌐 Running on:")
-    print("   • Windows 10 Chrome")
-    print("   • macOS Ventura Firefox")
-    print("   • Samsung Galaxy S22")
-    print("="*80)
-    
-    # Create capabilities
-    capabilities = [
-        create_chrome_windows_capabilities(),
-        create_firefox_macos_capabilities(),
-        create_android_capabilities()
-    ]
-    
-    # Run tests in parallel
-    threads = []
-    
-    for cap in capabilities:
-        thread = threading.Thread(target=run_complete_test, args=(cap,))
-        thread.start()
-        threads.append(thread)
-    
-    # Wait for all tests to complete
-    for thread in threads:
-        thread.join()
-    
-    # Print summary
-    print("\n" + "="*80)
-    print("📊 TEST RESULTS SUMMARY")
-    print("="*80)
-    
-    all_passed = True
-    for test_name, result in test_results.items():
-        status = "✅ PASSED" if result == "PASSED" else "❌ FAILED"
-        print(f"{test_name}: {status}")
-        if result != "PASSED":
-            print(f"   Error: {result}")
-            all_passed = False
-    
-    print("\n✨ Test suite execution completed!")
-    print("📈 Check BrowserStack dashboard for detailed results")
-    print("="*80)
-    
-    # Exit with appropriate code for Jenkins
-    exit(0 if all_passed else 1)
+    try:
+        # Initialize configuration
+        config = TestConfig()
+        
+        # Initialize test suite
+        test_suite = ECommerceTestSuite(config)
+        
+        # Run parallel tests
+        all_passed = test_suite.run_parallel_tests()
+        
+        # Exit with appropriate code for CI/CD
+        exit(0 if all_passed else 1)
+        
+    except Exception as e:
+        logger.error(f"Critical error in main execution: {e}")
+        exit(1)
 
 
 if __name__ == "__main__":
